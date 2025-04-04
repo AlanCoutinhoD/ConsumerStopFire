@@ -109,7 +109,7 @@ func (s *ConsumerService) consumeQueue(queueName string) {
 
 // sendToAPI sends the sensor message to the API endpoint
 func (s *ConsumerService) sendToAPI(msg domain.SensorMessage) {
-	apiURL := "http://localhost:8080/api/alerts"
+	apiURL := "http://98.85.68.200:8080/api/alerts"
 	
 	// Create the payload
 	payload, err := json.Marshal(msg)
