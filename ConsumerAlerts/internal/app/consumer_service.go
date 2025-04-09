@@ -1,56 +1,63 @@
 package app
 
 import (
-	"bytes"
-	"encoding/json"
-	"log"
-	"net/http"
-	"os"
-	"sync"
-	"time"
-
-	"github.com/yourusername/ConsumerAlerts/internal/domain"
-	"github.com/yourusername/ConsumerAlerts/internal/infrastructure"
+   
+    "encoding/json"
+    "sync"
+    "time"
+    "log"
+    "github.com/yourusername/ConsumerAlerts/internal/config"
+    "github.com/yourusername/ConsumerAlerts/internal/domain"
+    "github.com/yourusername/ConsumerAlerts/internal/infrastructure"
 )
 
-// ConsumerService handles the consumption of messages from RabbitMQ
 type ConsumerService struct {
-	rabbitMQ *infrastructure.RabbitMQConnection
-	client   *http.Client
+    rabbitMQ    domain.MessageQueueConnection
+    processor   *MessageProcessor
+    apiClient   *infrastructure.APIClient
+    config      *config.Config
+    logger      Logger
 }
 
-// NewConsumerService creates a new consumer service
-func NewConsumerService(rabbitMQ *infrastructure.RabbitMQConnection) *ConsumerService {
-	return &ConsumerService{
-		rabbitMQ: rabbitMQ,
-		client:   &http.Client{Timeout: 10 * time.Second},
-	}
+func NewConsumerService(
+    rabbitMQ domain.MessageQueueConnection,
+    processor *MessageProcessor,
+    apiClient *infrastructure.APIClient,
+    cfg *config.Config,
+    logger Logger,
+) *ConsumerService {
+    return &ConsumerService{
+        rabbitMQ:    rabbitMQ,
+        processor:   processor,
+        apiClient:   apiClient,
+        config:      cfg,
+        logger:      logger,
+    }
 }
 
-// StartConsuming starts consuming messages from all queues
 func (s *ConsumerService) StartConsuming() error {
-	queues := []string{
-		os.Getenv("RABBITMQ_QUEUE_KY026"),
-		os.Getenv("RABBITMQ_QUEUE_MQ2"),
-		os.Getenv("RABBITMQ_QUEUE_MQ135"),
-		os.Getenv("RABBITMQ_QUEUE_DHT22"),
-	}
+    queues := []string{
+        s.config.RabbitMQ.Queues.KY026,
+        s.config.RabbitMQ.Queues.MQ2,
+        s.config.RabbitMQ.Queues.MQ135,
+        s.config.RabbitMQ.Queues.DHT22,
+    }
 
-	var wg sync.WaitGroup
+    var wg sync.WaitGroup
 
-	for _, queue := range queues {
-		wg.Add(1)
-		go func(queueName string) {
-			defer wg.Done()
-			s.consumeQueue(queueName)
-		}(queue)
-	}
+    for _, queue := range queues {
+        wg.Add(1)
+        go func(queueName string) {
+            defer wg.Done()
+            s.consumeQueue(queueName)
+        }(queue)
+    }
 
-	wg.Wait()
-	return nil
+    wg.Wait()
+    return nil
 }
 
-// consumeQueue consumes messages from a specific queue
+
 func (s *ConsumerService) consumeQueue(queueName string) {
 	msgs, err := s.rabbitMQ.ConsumeQueue(queueName)
 	if err != nil {
@@ -60,11 +67,11 @@ func (s *ConsumerService) consumeQueue(queueName string) {
 
 	log.Printf("Successfully connected to queue: %s - Waiting for messages...", queueName)
 	
-	// Create a ticker for heartbeat messages
+	
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()
 	
-	// Use a separate goroutine for the heartbeat
+	// Heartbeat goroutine
 	go func() {
 		for {
 			select {
@@ -84,7 +91,7 @@ func (s *ConsumerService) consumeQueue(queueName string) {
 			continue
 		}
 
-		// Process the message with more visible formatting
+		
 		log.Printf("📊 PROCESSED MESSAGE DETAILS:")
 		log.Printf("  📌 Queue: %s", queueName)
 		log.Printf("  🔢 Número Serie: %s", sensorMsg.NumeroSerie)
@@ -93,7 +100,7 @@ func (s *ConsumerService) consumeQueue(queueName string) {
 		log.Printf("  🕓 Fecha Desactivación: %s", sensorMsg.FechaDesactivacion)
 		log.Printf("  🚦 Estado: %s", sensorMsg.GetEstadoAsString())
 		
-		// Add special handling for DHT22 sensor
+		
 		if sensorMsg.IsDHT22() {
 			log.Printf("  🌡️ Temperature reading: %s", sensorMsg.GetEstadoAsString())
 		} else if sensorMsg.IsAlert() {
@@ -103,32 +110,15 @@ func (s *ConsumerService) consumeQueue(queueName string) {
 		// Forward the message to the API
 		s.sendToAPI(sensorMsg)
 		
-		log.Printf("=======================================\n")
+		
 	}
 }
 
-// sendToAPI sends the sensor message to the API endpoint
+// Update the sendToAPI method to use apiClient instead of client
 func (s *ConsumerService) sendToAPI(msg domain.SensorMessage) {
-	apiURL := "http://98.85.68.200:8080/api/alerts"
-	
-	// Create the payload
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		log.Printf("Error marshaling message for API: %v", err)
-		return
-	}
-	
-	// Send the request
-	resp, err := s.client.Post(apiURL, "application/json", bytes.NewBuffer(payload))
-	if err != nil {
-		log.Printf("Error sending message to API: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		log.Printf("✅ Successfully sent message to API: %s", apiURL)
-	} else {
-		log.Printf("❌ Failed to send message to API. Status code: %d", resp.StatusCode)
-	}
+    if err := s.apiClient.SendAlert(msg); err != nil {
+        s.logger.Printf("Error sending message to API: %v", err)
+    } else {
+        s.logger.Printf("✅ Successfully sent message to API")
+    }
 }

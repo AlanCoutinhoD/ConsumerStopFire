@@ -3,8 +3,7 @@ package infrastructure
 import (
 	"fmt"
 	"log"
-	"os"
-
+	"github.com/yourusername/ConsumerAlerts/internal/config"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -15,29 +14,29 @@ type RabbitMQConnection struct {
 }
 
 // NewRabbitMQConnection creates a new RabbitMQ connection
-func NewRabbitMQConnection() (*RabbitMQConnection, error) {
-	host := os.Getenv("RABBITMQ_HOST")
-	port := os.Getenv("RABBITMQ_PORT")
-	user := os.Getenv("RABBITMQ_USER")
-	password := os.Getenv("RABBITMQ_PASSWORD")
+// Update the NewRabbitMQConnection function
+func NewRabbitMQConnection(config config.RabbitMQConfig) (*RabbitMQConnection, error) {
+    connectionString := fmt.Sprintf("amqp://%s:%s@%s:%s/", 
+        config.User, 
+        config.Password, 
+        config.Host, 
+        config.Port)
+    
+    conn, err := amqp.Dial(connectionString)
+    if err != nil {
+        return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+    }
 
-	connectionString := fmt.Sprintf("amqp://%s:%s@%s:%s/", user, password, host, port)
-	
-	conn, err := amqp.Dial(connectionString)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
-	}
+    ch, err := conn.Channel()
+    if err != nil {
+        conn.Close()
+        return nil, fmt.Errorf("failed to open a channel: %w", err)
+    }
 
-	ch, err := conn.Channel()
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to open a channel: %w", err)
-	}
-
-	return &RabbitMQConnection{
-		Connection: conn,
-		Channel:    ch,
-	}, nil
+    return &RabbitMQConnection{
+        Connection: conn,
+        Channel:    ch,
+    }, nil
 }
 
 // Close closes the RabbitMQ connection and channel
